@@ -2,15 +2,17 @@
 #include <stdio.h>
 #include <time.h>
 #include <math.h>
+#include <cuda_runtime.h>
 #include "vector.h"
 #include "config.h"
 #include "planets.h"
 #include "compute.h"
 
-// represents the objects in the system.  Global variables
+// represents the objects in the system. Global variables
 vector3 *hVel, *d_hVel;
 vector3 *hPos, *d_hPos;
-double *mass;
+double *mass, *d_mass;
+vector3 *d_accels;
 
 //initHostMemory: Create storage for numObjects entities in our system
 //Parameters: numObjects: number of objects to allocate
@@ -98,6 +100,16 @@ int main(int argc, char **argv)
 	initHostMemory(NUMENTITIES);
 	planetFill();
 	randomFill(NUMPLANETS + 1, NUMASTEROIDS);
+
+	// allocate gpu memory and copy initial state up
+	cudaMalloc((void**)&d_hPos, sizeof(vector3) * NUMENTITIES);
+	cudaMalloc((void**)&d_hVel, sizeof(vector3) * NUMENTITIES);
+	cudaMalloc((void**)&d_mass, sizeof(double) * NUMENTITIES);
+	cudaMalloc((void**)&d_accels, sizeof(vector3) * NUMENTITIES * NUMENTITIES);
+	cudaMemcpy(d_hPos, hPos, sizeof(vector3) * NUMENTITIES, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_hVel, hVel, sizeof(vector3) * NUMENTITIES, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_mass, mass, sizeof(double) * NUMENTITIES, cudaMemcpyHostToDevice);
+
 	//now we have a system.
 	#ifdef DEBUG
 	printSystem(stdout);
@@ -105,11 +117,22 @@ int main(int argc, char **argv)
 	for (t_now=0;t_now<DURATION;t_now+=INTERVAL){
 		compute();
 	}
+
+	// copy results back to host before printing
+	cudaMemcpy(hPos, d_hPos, sizeof(vector3) * NUMENTITIES, cudaMemcpyDeviceToHost);
+	cudaMemcpy(hVel, d_hVel, sizeof(vector3) * NUMENTITIES, cudaMemcpyDeviceToHost);
+
 	clock_t t1=clock()-t0;
-#ifdef DEBUG
+	#ifdef DEBUG
 	printSystem(stdout);
-#endif
+	#endif
 	printf("This took a total time of %f seconds\n",(double)t1/CLOCKS_PER_SEC);
+
+	// free gpu memory
+	cudaFree(d_hPos);
+	cudaFree(d_hVel);
+	cudaFree(d_mass);
+	cudaFree(d_accels);
 
 	freeHostMemory();
 }
